@@ -1,7 +1,7 @@
 {
   "name": "linkmedic",
   "displayName": "LinkMedic",
-  "description": "Finds broken image and file links in HTML and PHP.",
+  "description": "Finds broken image and file links in HTML, PHP as well as in MERN stack.",
   "publisher": "JawaanSanth",
   "icon": "Linkmedicicon.png",
   "repository": {},
