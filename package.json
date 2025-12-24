@@ -4,13 +4,25 @@
   "description": "Finds broken image and file links in HTML, PHP as well as in MERN stack.",
   "publisher": "JawaanSanth",
   "icon": "Linkmedicicon.png",
-  "repository": {},
-  "version": "0.0.2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jawaanquizziz/LinkMedic.git"
+  },
+  "version": "0.0.3",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.107.0"
   },
-  "categories": [
+  "categories": ["Programming Languages",
     "Other"
+  ],
+  "keywords": [
+    "mern",
+    "react",
+    "path-validator",
+    "broken-links",
+    "javascript",
+    "typescript"
   ],
   "activationEvents": ["onLanguage:html",
     "onLanguage:php","onLanguage:javascript",
