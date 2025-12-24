@@ -5,7 +5,7 @@
   "publisher": "JawaanSanth",
   "icon": "Linkmedicicon.png",
   "repository": {},
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.107.0"
   },
@@ -13,7 +13,10 @@
     "Other"
   ],
   "activationEvents": ["onLanguage:html",
-    "onLanguage:php"],
+    "onLanguage:php","onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact"],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
