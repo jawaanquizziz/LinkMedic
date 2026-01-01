@@ -8,12 +8,13 @@
     "type": "git",
     "url": "https://github.com/jawaanquizziz/LinkMedic.git"
   },
-  "version": "0.0.3",
+  "version": "0.1.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.107.0"
   },
-  "categories": ["Programming Languages",
+  "categories": [
+    "Programming Languages",
     "Other"
   ],
   "keywords": [
@@ -24,17 +25,28 @@
     "javascript",
     "typescript"
   ],
-  "activationEvents": ["onLanguage:html",
-    "onLanguage:php","onLanguage:javascript",
+  "activationEvents": [
+    "onLanguage:html",
+    "onLanguage:php",
+    "onLanguage:javascript",
     "onLanguage:javascriptreact",
     "onLanguage:typescript",
-    "onLanguage:typescriptreact"],
+    "onLanguage:typescriptreact"
+  ],
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "linkmedic.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "linkmedic.createFile",
+        "title": "Linkmedic: Create Missing file"
       }
     ]
   },

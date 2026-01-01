@@ -3,3 +3,25 @@ dist
 node_modules
 .vscode-test/
 *.vsix
+
+# Security / Environment
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.cer
+id_rsa
+id_rsa.pub
+secrets.yaml
+secrets.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
