@@ -9,3 +9,12 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+
+# Misc
+test-fixture/**
+.github/**
+.git/**
+.DS_Store
+Thumbs.db
+regex_test.js
+debug_regex.js

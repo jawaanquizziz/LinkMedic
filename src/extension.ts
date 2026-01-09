@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { LinkCompletionProvider } from './LinkCompletionProvider';
 
 export async function activate(context: vscode.ExtensionContext) {
     vscode.window.showInformationMessage('LinkMedic is now Active');
@@ -76,8 +77,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
         const text = document.getText();
 
-        // UPDATED REGEX: Now catches PHP includes/requires
-        const htmlRegex = /(?:src|href|include|require|include_once|require_once)\s*=?\s*["']([^"']+)["']/g;
+        // UPDATED REGEX: Now catches PHP includes/requires with key fix for parentheses
+        const htmlRegex = /(?:src|href|include|require|include_once|require_once)\s*=?\s*\(?\s*["']([^"']+)["']/g;
         const mernRegex = /(?:import|from|require)\s*\(?["']([^"']+)["']\)?/g;
 
         const isMernFile = ['javascript', 'javascriptreact', 'typescript', 'typescriptreact'].includes(document.languageId);
@@ -97,22 +98,32 @@ export async function activate(context: vscode.ExtensionContext) {
         }
 
         const checks = matches.map(async (match) => {
-            let linkPath = match[1];
-            if (linkPath.startsWith('http') || linkPath.startsWith('//') || linkPath.startsWith('mailto:') || linkPath.startsWith('data:')) return null;
+            const originalPath = match[1];
+            // Normalize path separators
+            let normalizedPath = originalPath.replace(/\\/g, '/');
+
+            // Decode URI components (e.g. %20 -> space)
+            try {
+                normalizedPath = decodeURIComponent(normalizedPath);
+            } catch (e) {
+                // Keep as is if decode fails
+            }
+
+            if (normalizedPath.startsWith('http') || normalizedPath.startsWith('//') || normalizedPath.startsWith('mailto:') || normalizedPath.startsWith('data:') || normalizedPath.startsWith('#')) return null;
 
             let fileUri: vscode.Uri;
             let isAlias = false;
 
-            if (isMernFile && !linkPath.startsWith('.') && !linkPath.startsWith('/')) {
+            if (isMernFile && !normalizedPath.startsWith('.') && !normalizedPath.startsWith('/')) {
                 // Try to resolve alias
                 let resolved = false;
                 if (pathsConfig.paths) {
                     for (const pattern in pathsConfig.paths) {
                         const cleanPattern = pattern.replace('/*', '');
-                        if (linkPath.startsWith(cleanPattern)) {
+                        if (normalizedPath.startsWith(cleanPattern)) {
                             const target = pathsConfig.paths[pattern][0].replace('/*', '');
                             // Replace alias prefix with target path
-                            const relativePath = linkPath.replace(cleanPattern, target);
+                            const relativePath = normalizedPath.replace(cleanPattern, target);
 
                             // Construct full path: WorkspaceRoot + BaseUrl + TargetPath
                             // BaseUrl is usually relative to the tsconfig file location (WorkspaceRoot)
@@ -128,27 +139,93 @@ export async function activate(context: vscode.ExtensionContext) {
                 // If not an alias and not relative, it's a node_module => ignore
                 if (!resolved) return null;
             } else {
-                fileUri = vscode.Uri.joinPath(document.uri, '..', linkPath);
+                if (normalizedPath.startsWith('/')) {
+                    // Check against workspace root for absolute paths (e.g. /css/style.css)
+                    if (workspaceFolder) {
+                        // Correct Logic: Treat "/" as "Workspace Root" not "Filesystem Root"
+                        // Remove leading slash to make it relative to workspace folder
+                        const relativePath = normalizedPath.slice(1);
+
+                        // Try resolving against standard web roots
+                        const possibleRoots = ['', 'public', 'static', 'dist', 'build', 'docs', 'public_html', 'www'];
+
+                        // Heuristic: If the path starts with the workspace folder name, try stripping it
+                        // e.g. path is "/LinkMedic/images/Icon.png" and workspace is "LinkMedic"
+                        // we want to check "images/Icon.png"
+                        if (workspaceFolder) {
+                            const wsName = workspaceFolder.name;
+                            const wsPathPrefix = `${wsName}/`;
+                            if (relativePath.startsWith(wsPathPrefix)) {
+                                possibleRoots.push(relativePath.substring(wsPathPrefix.length)); // Add stripped path as a "root" relative candidate
+                                // Check stripped path against all roots too? 
+                                // Actually, simpler: just add the stripped version as a candidate URI directly later or handle here.
+                                // Let's simplify: we will construct candidates.
+                            }
+                        }
+
+                        let foundUri: vscode.Uri | undefined;
+
+                        for (const root of possibleRoots) {
+                            let candidate = root ? `${root}/${relativePath}` : relativePath;
+
+                            // Check regular candidate
+                            let uri = vscode.Uri.joinPath(workspaceFolder.uri, candidate);
+                            try {
+                                // @ts-ignore
+                                await vscode.workspace.fs.stat(uri);
+                                foundUri = uri;
+                                console.log(`LinkMedic Debug: Found '${normalizedPath}' at '${uri.fsPath}'`);
+                                break;
+                            } catch { }
+
+                            // If we didn't find it, and we haven't stripped the workspace name yet...
+                            // Actually, let's treat the stripping as just another candidate transformation
+                            if (workspaceFolder && relativePath.startsWith(`${workspaceFolder.name}/`)) {
+                                const stripped = relativePath.substring(workspaceFolder.name.length + 1);
+                                candidate = root ? `${root}/${stripped}` : stripped;
+                                uri = vscode.Uri.joinPath(workspaceFolder.uri, candidate);
+                                try {
+                                    // @ts-ignore
+                                    await vscode.workspace.fs.stat(uri);
+                                    foundUri = uri;
+                                    console.log(`LinkMedic Debug: Found '${normalizedPath}' (stripped ws name) at '${uri.fsPath}'`);
+                                    break;
+                                } catch { }
+                            }
+                        }
+
+                        if (foundUri) {
+                            fileUri = foundUri;
+                        } else {
+                            // Default to strict root if none found, to let the error logic downstream handle it (or use the first one)
+                            fileUri = vscode.Uri.joinPath(workspaceFolder.uri, relativePath);
+                            console.log(`LinkMedic Debug: Root path '${normalizedPath}' NOT found in [${possibleRoots.join(', ')}]. Defaulting to '${fileUri.fsPath}'`);
+                        }
+                    } else {
+                        // Fallback: If no workspace, treat / as relative to drive root (unlikely useful) or just ignore?
+                        // Better: attempt relative to current file's drive root using fsPath logic
+                        fileUri = vscode.Uri.file(normalizedPath);
+                    }
+                } else {
+                    // Relative to current file
+                    fileUri = vscode.Uri.joinPath(document.uri, '..', normalizedPath);
+                }
             }
 
             // Logic to check file existence (same as before)
             let fileExists = false;
 
             try {
-                // If it was an alias, we already constructed the final URI.
-                // However, TS aliases might handle extensions automatically too.
-                // If it's a standard path (not initialized above), TS might complain, but logic flow ensures fileUri is set if we get here.
-
-                // Note: fileUri is assigned in both branches above.
-                // TypeScript workaround: logic guarantees fileUri is assigned
                 // @ts-ignore
                 await vscode.workspace.fs.stat(fileUri);
                 fileExists = true;
             } catch {
-                if (isMernFile) {
-                    const extensions = ['.js', '.jsx', '.ts', '.tsx', '/index.js', '/index.jsx', '/index.tsx'];
-                    // We can also parallelize these extension checks if we want, but sequential here is probably okay since it's local to one "logical" file check.
-                    // However, for maximum speed, let's parallelize them too.
+                if (isMernFile || document.languageId === 'html' || document.languageId === 'php') {
+                    // Also check for extensions in HTML/PHP (some frameworks omit them)
+                    const extensions = isMernFile
+                        ? ['.js', '.jsx', '.ts', '.tsx', '/index.js', '/index.jsx', '/index.tsx']
+                        : ['.html', '.php', '.css', '.js'];
+
                     const extensionChecks = extensions.map(async (ext) => {
                         try {
                             // @ts-ignore
@@ -165,12 +242,52 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
             }
 
+            // 1. Comment Check
+            const matchIndex = match.index;
+            const line = document.lineAt(document.positionAt(matchIndex).line).text;
+            // Simple Line Comment Check (Improvement: could specific to lang)
+            if (line.trim().startsWith('//') || line.trim().startsWith('#') || line.trim().startsWith('*')) {
+                return null; // Ignore comments
+            }
+            // Check HTML comments <!-- --> (Same line only for simplicity)
+            const preceding = line.substring(0, document.positionAt(matchIndex).character);
+            if (preceding.includes('<!--') && !preceding.includes('-->')) {
+                return null;
+            }
+
             if (!fileExists) {
-                const start = document.positionAt(match.index + match[0].indexOf(linkPath));
-                const end = document.positionAt(match.index + match[0].indexOf(linkPath) + linkPath.length);
+                // FUZZY SAFETY NET
+                console.log(`LinkMedic Debug: Strict check failed for '${normalizedPath}'. Trying fuzzy search...`);
+
+                // Extract filename
+                const fileName = normalizedPath.split('/').pop();
+                if (fileName) {
+                    // We can't access LinkCompletionProvider's private cache easily here without refactoring.
+                    // But we can use workspace.findFiles for a targeted check.
+                    // Limit to 1 to be fast.
+                    const fuzzyMatches = await vscode.workspace.findFiles(`**/${fileName}`, '**/node_modules/**', 1);
+
+                    if (fuzzyMatches.length > 0) {
+                        // Found it somewhere else!
+                        const foundPath = vscode.workspace.asRelativePath(fuzzyMatches[0]);
+                        console.log(`LinkMedic Debug: Fuzzy found '${fileName}' at '${foundPath}'`);
+
+                        const start = document.positionAt(match.index + match[0].indexOf(originalPath));
+                        const end = document.positionAt(match.index + match[0].indexOf(originalPath) + originalPath.length);
+
+                        // Return WARNING instead of Error
+                        // User Request: Silence if found anywhere.
+                        console.log(`LinkMedic: Silencing error for ${fileName} because it exists at ${foundPath}`);
+                        return null;
+                    }
+                }
+
+                console.log(`LinkMedic Debug: FAILED to find '${normalizedPath}' at '${fileUri!.fsPath}' and fuzzy search failed.`);
+                const start = document.positionAt(match.index + match[0].indexOf(originalPath));
+                const end = document.positionAt(match.index + match[0].indexOf(originalPath) + originalPath.length);
                 return new vscode.Diagnostic(
                     new vscode.Range(start, end),
-                    `LinkMedic: File not found -> ${linkPath}`,
+                    `LinkMedic: File not found -> ${normalizedPath}`,
                     vscode.DiagnosticSeverity.Error
                 );
             }
@@ -190,111 +307,17 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(configWatcher);
 
 
+    const linkProvider = new LinkCompletionProvider();
+
+    // Register the custom completion provider
     const pathCompletionProvider = vscode.languages.registerCompletionItemProvider(
         supportedLangs,
-        {
-            async provideCompletionItems(document, position) {
-                const linePrefix = document.lineAt(position).text.substr(0, position.character);
-                // Regex to capture the content inside quotes up to the cursor
-                const match = linePrefix.match(/(?:src|href|import|from|include|require|include_once|require_once)\s*\(?=?\s*["']([^"']*)$/);
-                if (!match) return undefined;
-
-                const typedPath = match[1];
-                const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
-                if (!workspaceFolder) return undefined;
-
-                // Determine the directory we want to list content from
-                let searchUri: vscode.Uri;
-
-                // Case 1: Alias (e.g. @/components/)
-                let isAlias = false;
-                if ((typedPath.startsWith('@') || typedPath.match(/^[a-zA-Z0-9_-]/)) && workspaceFolder) {
-                    const config = await loadPathsConfig(workspaceFolder);
-                    if (config.paths) {
-                        for (const pattern in config.paths) {
-                            const cleanPattern = pattern.replace('/*', '');
-                            if (typedPath.startsWith(cleanPattern)) {
-                                const target = config.paths[pattern][0].replace('/*', '');
-                                const relativeTyped = typedPath.replace(cleanPattern, target);
-
-                                // We want the directory of what is typed. 
-                                // valid: @/comp -> list @/ (which maps to src/) filtering by "comp"
-                                // valid: @/components/B -> list @/components/ filtering by "B"
-
-                                const base = config.baseUrl || '.';
-                                const fullPath = vscode.Uri.joinPath(workspaceFolder.uri, base, relativeTyped);
-
-                                // If typedPath ends with /, we search that dir. If not, we search parent.
-                                if (typedPath.endsWith('/')) {
-                                    searchUri = fullPath;
-                                } else {
-                                    searchUri = vscode.Uri.joinPath(fullPath, '..');
-                                }
-                                isAlias = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Case 2: Relative path (e.g. ./ or ../ or just typing a subfolder)
-                if (!isAlias) {
-                    if (typedPath.startsWith('/')) {
-                        // Absolute from workspace root? Or OS root? 
-                        // Usually in web projects / means root. Let's assume workspace root.
-                        searchUri = workspaceFolder.uri;
-                        if (typedPath.length > 1) {
-                            const fullPath = vscode.Uri.joinPath(workspaceFolder.uri, typedPath);
-                            if (typedPath.endsWith('/')) {
-                                searchUri = fullPath;
-                            } else {
-                                searchUri = vscode.Uri.joinPath(fullPath, '..');
-                            }
-                        }
-                    } else {
-                        // Relative to document
-                        const currentDir = vscode.Uri.joinPath(document.uri, '..');
-                        if (typedPath === '') {
-                            searchUri = currentDir;
-                        } else {
-                            const fullPath = vscode.Uri.joinPath(currentDir, typedPath);
-                            if (typedPath.endsWith('/')) {
-                                searchUri = fullPath;
-                            } else {
-                                searchUri = vscode.Uri.joinPath(fullPath, '..');
-                            }
-                        }
-                    }
-                }
-
-                try {
-                    // @ts-ignore
-                    const files = await vscode.workspace.fs.readDirectory(searchUri);
-                    const lastSegment = typedPath.split('/').pop() || "";
-
-                    return files.map(([name, type]) => {
-                        // Filter based on what user already typed? VS Code handles fuzzy filtering, 
-                        // but if we are providing a specific list based on dir, we usually give everything.
-
-                        // We must define what text is inserted.
-                        // If typed ./comp, and we suggest 'components', insertText should be 'components'.
-
-                        const item = new vscode.CompletionItem(name,
-                            type === vscode.FileType.Directory ? vscode.CompletionItemKind.Folder : vscode.CompletionItemKind.File
-                        );
-
-                        if (type === vscode.FileType.Directory) {
-                            item.command = { command: 'editor.action.triggerSuggest', title: 'Re-trigger' };
-                            // Add trailing slash for convenience? 
-                            // VS Code might double it if user types it. Let's stick to name.
-                        }
-                        return item;
-                    });
-                } catch { return undefined; }
-            }
-        },
-        '/', '.', '@', '"', "'"
+        linkProvider,
+        '/', '.', '@', '"', "'", '='
     );
+
+    // Ensure we dispose of the provider's resources (file watcher)
+    context.subscriptions.push(linkProvider);
 
     // Debounce the live checking to avoid performance issues while typing
     let timeout: NodeJS.Timeout | undefined = undefined;

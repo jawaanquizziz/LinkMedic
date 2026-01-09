@@ -8,7 +8,7 @@
     "type": "git",
     "url": "https://github.com/jawaanquizziz/LinkMedic.git"
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "engines": {
     "vscode": "^1.107.0"
