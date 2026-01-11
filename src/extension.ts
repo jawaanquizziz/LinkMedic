@@ -111,6 +111,32 @@ export async function activate(context: vscode.ExtensionContext) {
 
             if (normalizedPath.startsWith('http') || normalizedPath.startsWith('//') || normalizedPath.startsWith('mailto:') || normalizedPath.startsWith('data:') || normalizedPath.startsWith('#')) return null;
 
+            // FIX: Enforce Forward Slashes
+            if (originalPath.includes('\\')) {
+                const start = document.positionAt(match.index + match[0].indexOf(originalPath));
+                const end = document.positionAt(match.index + match[0].indexOf(originalPath) + originalPath.length);
+                return new vscode.Diagnostic(
+                    new vscode.Range(start, end),
+                    `LinkMedic: Avoid backslashes in web paths -> ${originalPath}`,
+                    vscode.DiagnosticSeverity.Error // User clearly considers this WRONG
+                );
+            }
+
+            // FIX: Ignore interpolated strings (JS/TS templates or PHP)
+            if (normalizedPath.includes('${') || normalizedPath.includes('{$')) {
+                return null;
+            }
+
+            // FIX: Ignore Relative Directory Traversal (User Request)
+            if (normalizedPath.includes('..')) {
+                return null;
+            }
+
+            // FIX: Strip query parameters
+            if (normalizedPath.includes('?')) {
+                normalizedPath = normalizedPath.split('?')[0];
+            }
+
             let fileUri: vscode.Uri;
             let isAlias = false;
 

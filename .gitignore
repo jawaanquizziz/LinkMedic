@@ -30,3 +30,6 @@ Thumbs.db
 coverage/
 .nyc_output/
 .vscode/
+
+# LinkMedic Testing
+test-fixture/
